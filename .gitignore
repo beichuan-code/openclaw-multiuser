@@ -1,0 +1,13 @@
+node_modules/
+*.db
+*.db-shm
+*.db-wal
+uploads/
+data/
+*.log
+*.err
+.env
+.env.*
+auth-prod.db
+auth.db
+file-server.db
