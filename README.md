@@ -115,6 +115,16 @@ open http://localhost:19000/static/chat-prod.html
 
 ---
 
+## 赞助 · Sponsor
+
+如果这个项目对你有帮助，欢迎请作者喝杯咖啡 ☕
+
+<img src="docs/alipay.jpg" alt="支付宝赞赏" width="200">
+
+商业授权请联系：bczhou@gmail.com → [查看商业授权](COMMERCIAL.md)
+
+---
+
 ## 致谢 · Acknowledgements
 
 基于 [OpenClaw](https://openclaw.ai) 构建 — The open-source AI coding assistant.
