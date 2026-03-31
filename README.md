@@ -9,13 +9,13 @@
 ## 界面预览 · Screenshots
 
 ### 多 Agent 聊天协同
-![Chat UI](docs/screenshots/chat.png)
+![Chat UI](docs/screenshots/chat.jpg)
 
 ### 文件管理
-![File Manager](docs/screenshots/files.png)
+![File Manager](docs/screenshots/file.jpg)
 
 ### 技能市场
-![Skill Market](docs/screenshots/skills.png)
+![Skill Market](docs/screenshots/skills%20and%20tools.jpg)
 
 ---
 
