@@ -2289,6 +2289,7 @@ async function checkGateway() {
     // 用 sessions_list 检测 Gateway 是否在线（比 session_status 更稳定）
     await api('sessions_list', {}, `agent:main:${userId}`);
     gateway_ok = true;
+    showGatewayOverlay(false);
     // 所有 agent 标记 online
     AGENTS.forEach(a => {
       setAgentStatus(a.id, 'online');
@@ -2304,7 +2305,36 @@ async function checkGateway() {
       setAgentStatus(a.id, 'offline');
       document.getElementById(`sendBtn-${a.id}`).disabled = true;
     });
+    showGatewayOverlay(true);
     setTimeout(checkGateway, 5000);
+  }
+}
+
+// ── Gateway 重启等待遮罩 ──
+function showGatewayOverlay(show) {
+  let overlay = document.getElementById('gateway-overlay');
+  if (show) {
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'gateway-overlay';
+      overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:9999;';
+      overlay.innerHTML = `<div style="background:var(--bg,#fff);border-radius:12px;padding:32px 48px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,0.2);">
+        <div style="font-size:32px;margin-bottom:12px;">⏳</div>
+        <div style="font-size:16px;font-weight:600;color:var(--text,#333);">Gateway 正在启动</div>
+        <div style="font-size:13px;color:var(--text-secondary,#888);margin-top:8px;">配置已更新，正在重新加载，请稍候...</div>
+        <div style="margin-top:16px;width:40px;height:40px;border:3px solid var(--border,#e0e0e0);border-top-color:var(--primary,#4caf50);border-radius:50%;animation:spin 1s linear infinite;margin:16px auto 0;"></div>
+      </div>`;
+      if (!document.getElementById('gateway-spin-style')) {
+        const style = document.createElement('style');
+        style.id = 'gateway-spin-style';
+        style.textContent = '@keyframes spin{to{transform:rotate(360deg)}}';
+        document.head.appendChild(style);
+      }
+      document.body.appendChild(overlay);
+    }
+    overlay.style.display = 'flex';
+  } else {
+    if (overlay) overlay.style.display = 'none';
   }
 }
 

@@ -511,18 +511,143 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // ── GET /api/gateway/status — Gateway 状态查询 ──────────────────────
+    if (pathname === '/api/gateway/status' && req.method === 'GET') {
+      const username = payload.sub;
+      const entry = gwProcesses[username];
+      if (!entry?.port) return json(res, 200, { status: 'stopped', ready: false });
+      const alive = await isGatewayAlive(entry.port);
+      return json(res, 200, { status: alive ? 'running' : 'starting', ready: alive });
+    }
+
     // ── GET /api/agents — agent 列表（所有登录用户可访问）──────────────────
     if (pathname === '/api/agents' && req.method === 'GET') {
       try {
-        const altPath = path.join(require('os').homedir(), '.openclaw', 'openclaw.json');
-        const cfg = JSON.parse(fs.readFileSync(altPath, 'utf8'));
+        const cfgFile = path.join(WORKSPACE_ROOT, payload.sub, 'openclaw.json');
+        const cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
         const list = (cfg.agents && cfg.agents.list) || [];
-        const agents = list.map(a => ({
-          id:    a.id,
-          name:  (a.identity && a.identity.name) || a.name || a.id,
-          emoji: (a.identity && a.identity.emoji) || '🤖',
-        }));
+        const displayPath = path.join(WORKSPACE_ROOT, payload.sub, 'agent-display.json');
+        let displayMap = {};
+        if (fs.existsSync(displayPath)) {
+          try { displayMap = JSON.parse(fs.readFileSync(displayPath, 'utf8')); } catch {}
+        }
+        const agents = list.map(a => {
+          const disp = displayMap[a.id] || {};
+          const obj = {
+            id:    a.id,
+            name:  (a.identity && a.identity.name) || a.name || a.id,
+            emoji: (a.identity && a.identity.emoji) || '🤖',
+          };
+          if (disp.role !== undefined) obj.role = disp.role;
+          if (disp.desc !== undefined) obj.desc = disp.desc;
+          return obj;
+        });
         return json(res, 200, { agents });
+      } catch(e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // ── GET /api/config/get — 读取用户 openclaw.json ────────────────────────
+    if (pathname === '/api/config/get' && req.method === 'GET') {
+      try {
+        const cfgPath = path.join(WORKSPACE_ROOT, payload.sub, 'openclaw.json');
+        if (!fs.existsSync(cfgPath)) return json(res, 200, {});
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        return json(res, 200, cfg);
+      } catch(e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // ── POST /api/config/patch — 深合并写入用户 openclaw.json ───────────────
+    if (pathname === '/api/config/patch' && req.method === 'POST') {
+      try {
+        const body = JSON.parse((await readBody(req)).toString('utf8'));
+        const cfgPath = path.join(WORKSPACE_ROOT, payload.sub, 'openclaw.json');
+        let current = {};
+        if (fs.existsSync(cfgPath)) {
+          try { current = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch {}
+        }
+        function deepMerge(target, source) {
+          for (const key of Object.keys(source)) {
+            if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key]) &&
+                target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+              deepMerge(target[key], source[key]);
+            } else {
+              target[key] = source[key];
+            }
+          }
+          return target;
+        }
+        if (body.agents && Array.isArray(body.agents.list)) {
+          const existingList = (current.agents && current.agents.list) || [];
+          const patchedList = body.agents.list.map(a => {
+            const clean = { id: a.id };
+            const displayName = a.name || a.id;
+            const emoji = a.emoji || (a.identity && a.identity.emoji) || '🤖';
+            clean.name = displayName;
+            clean.identity = { name: displayName, emoji };
+            if (a.agentDir) clean.agentDir = a.agentDir;
+            if (a.modelId) {
+              const provider = a.providerId || 'default';
+              clean.model = { primary: provider + '/' + a.modelId };
+            }
+            return clean;
+          });
+          const displayPath = path.join(WORKSPACE_ROOT, payload.sub, 'agent-display.json');
+          let displayMap = {};
+          if (fs.existsSync(displayPath)) {
+            try { displayMap = JSON.parse(fs.readFileSync(displayPath, 'utf8')); } catch {}
+          }
+          body.agents.list.forEach(a => {
+            if (a.role !== undefined || a.desc !== undefined) {
+              if (!displayMap[a.id]) displayMap[a.id] = {};
+              if (a.role !== undefined) displayMap[a.id].role = a.role;
+              if (a.desc !== undefined) displayMap[a.id].desc = a.desc;
+            }
+          });
+          fs.writeFileSync(displayPath, JSON.stringify(displayMap, null, 2), 'utf8');
+          const merged = [...existingList];
+          patchedList.forEach(pa => {
+            const idx = merged.findIndex(e => e.id === pa.id);
+            if (idx >= 0) merged[idx] = Object.assign({}, merged[idx], pa);
+            else merged.push(pa);
+          });
+          body.agents.list = merged;
+          const allIds = merged.map(a => a.id);
+          if (!body.tools) body.tools = {};
+          if (!body.tools.agentToAgent) body.tools.agentToAgent = {};
+          body.tools.agentToAgent.allow = allIds;
+        }
+        const before = JSON.stringify(current);
+        deepMerge(current, body);
+        const after = JSON.stringify(current);
+        if (before !== after) {
+          const tmpPath = cfgPath + '.tmp';
+          fs.writeFileSync(tmpPath, JSON.stringify(current, null, 2), 'utf8');
+          fs.renameSync(tmpPath, cfgPath);
+
+          // ── 热重载：同步 TEAM.md + 重启 Gateway ──
+          const username = payload.sub;
+          try {
+            const { execFileSync } = require('child_process');
+            execFileSync('node', [
+              path.join(__dirname, '..', 'scripts', 'sync-team.js'),
+              cfgPath
+            ], { timeout: 5000 });
+            console.log(`[hot-reload] TEAM.md synced for ${username}`);
+          } catch (e) {
+            console.error(`[hot-reload] sync-team failed: ${e.message}`);
+          }
+          const entry = gwProcesses[username];
+          if (entry?.port) {
+            console.log(`[hot-reload] restarting gateway for ${username}`);
+            stopGateway(username);
+            setTimeout(() => startGateway(username, entry.port), 2000);
+          }
+        }
+        return json(res, 200, { ok: true, reloaded: before !== after });
       } catch(e) {
         return json(res, 500, { error: e.message });
       }
